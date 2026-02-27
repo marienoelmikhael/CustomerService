@@ -1,0 +1,32 @@
+Brand,Model,Price,Storage,ScreenSize,Battery,CameraMP
+Apple,iPhone 15,999,128,6.1,3349,48
+Apple,iPhone 15 Pro,1199,256,6.1,3274,48
+Apple,iPhone 14,799,128,6.1,3279,12
+Apple,iPhone 13,699,128,6.1,3240,12
+Samsung,Galaxy S24,899,256,6.2,4000,50
+Samsung,Galaxy S24 Ultra,1299,512,6.8,5000,200
+Samsung,Galaxy A54,449,128,6.4,5000,50
+Samsung,Galaxy A34,349,128,6.6,5000,48
+Xiaomi,Redmi Note 13,299,128,6.6,5000,108
+Xiaomi,Redmi Note 13 Pro,399,256,6.67,5100,200
+Xiaomi,Mi 13T,599,256,6.67,5000,50
+Xiaomi,Mi 14,899,512,6.36,4610,50
+Google,Pixel 8,699,128,6.2,4575,50
+Google,Pixel 8 Pro,999,256,6.7,5050,50
+OnePlus,OnePlus 12,799,256,6.7,5400,50
+OnePlus,OnePlus 11,649,256,6.7,5000,50
+Huawei,P60 Pro,899,256,6.67,4815,48
+Huawei,Nova 11,499,256,6.7,4500,50
+Oppo,Find X5,799,256,6.55,4800,50
+Oppo,Reno 10,499,256,6.7,5000,64
+Sony,Xperia 1 V,1299,256,6.5,5000,48
+Sony,Xperia 5 V,999,128,6.1,5000,48
+Motorola,Edge 40,599,256,6.55,4400,50
+Motorola,G84,349,256,6.5,5000,50
+Nokia,X30,449,128,6.43,4200,50
+Realme,GT 5,599,256,6.74,5240,50
+Realme,C55,199,128,6.72,5000,64
+Asus,ROG Phone 7,999,512,6.78,6000,50
+Asus,Zenfone 10,699,256,5.9,4300,50
+Honor,Magic 6 Pro,1099,512,6.8,5600,50
+Honor,90,499,256,6.7,5000,200
