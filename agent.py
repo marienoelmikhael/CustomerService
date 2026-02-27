@@ -1,77 +1,39 @@
 import os
-import json
-import pandas as pd
 from dotenv import load_dotenv
 from pathlib import Path
-from typing import Any
 
+# Add references
 from azure.identity import DefaultAzureCredential
 from azure.ai.projects import AIProjectClient
 from azure.ai.projects.models import (
     PromptAgentDefinition,
-    FunctionTool,
-)
-from openai.types.responses.response_input_param import (
-    FunctionCallOutput,
-    ResponseInputParam,
+    CodeInterpreterTool,
+    CodeInterpreterToolAuto,
 )
 
 
-# ========================
-# Custom function that the agent will call
-# ========================
-def recommend_phone(
-    budget: float,
-    brand: str = "",
-    min_storage: int = 0,
-    min_screen_size: float = 0.0,
-) -> str:
-
-    # Load dataset
-    script_dir = Path(__file__).parent
-    file_path = script_dir / "phones.csv"
-    df = pd.read_csv(file_path)
-
-    # Apply filters
-    filtered = df[df["Price"] <= budget]
-
-    if brand:
-        filtered = filtered[
-            filtered["Brand"].str.lower().str.contains(brand.lower())
-        ]
-
-    if min_storage > 0:
-        filtered = filtered[filtered["Storage"] >= min_storage]
-
-    if min_screen_size > 0:
-        filtered = filtered[filtered["ScreenSize"] >= min_screen_size]
-
-    if filtered.empty:
-        return json.dumps(
-            {"message": "No phones found matching your criteria. Try adjusting filters."}
-        )
-
-    # Sort by price (best value first)
-    filtered = filtered.sort_values(by="Price")
-
-    # Take top 3
-    results = filtered.head(3).to_dict(orient="records")
-
-    return json.dumps({"recommendations": results})
-
-
-# ========================
-# Main driver
-# ========================
 def main():
 
+    # Clear the console
     os.system("cls" if os.name == "nt" else "clear")
 
+    # Load environment variables from .env file
     load_dotenv()
     project_endpoint = os.getenv("PROJECT_ENDPOINT")
     model_deployment = os.getenv("MODEL_DEPLOYMENT_NAME")
 
-    # Connect to AI Project + OpenAI
+    # Ask the user for their budget
+    while True:
+        try:
+            budget = float(input("Enter your budget (in USD): "))
+            break
+        except ValueError:
+            print("Please enter a valid number.")
+
+    # Connect to the AI Project and OpenAI clients
+    script_dir = Path(__file__).parent
+    file_path = script_dir / "phones.csv"
+
     with (
         DefaultAzureCredential(
             exclude_environment_credential=True,
@@ -81,72 +43,99 @@ def main():
         project_client.get_openai_client() as openai_client,
     ):
 
-        # Create the function tool we will expose to the agent
-        tool = FunctionTool(
-            name="recommend_phone",
-            description="Recommends phones given user budget and preferences.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "budget": {
-                        "type": "number",
-                        "description": "Maximum budget in $",
-                    },
-                    "brand": {
-                        "type": "string",
-                        "description": "Preferred brand (optional)",
-                    },
-                    "min_storage": {
-                        "type": "integer",
-                        "description": "Minimum storage in GB",
-                    },
-                    "min_screen_size": {
-                        "type": "number",
-                        "description": "Minimum screen size in inches",
-                    },
-                },
-                "required": ["budget"],
-                "additionalProperties": False,
-            },
+        # Upload the phones.csv file and create a CodeInterpreterTool
+        uploaded_file = openai_client.files.create(
+            file=open(file_path, "rb"),
+            purpose="assistants",
+        )
+        print(f"Uploaded {uploaded_file.filename}")
+
+        code_interpreter = CodeInterpreterTool(
+            container=CodeInterpreterToolAuto(file_ids=[uploaded_file.id])
         )
 
-        # Define the agent
+        # Define an agent that uses the CodeInterpreterTool
         agent = project_client.agents.create_version(
-            agent_name="phone-advisor-agent",
+            agent_name="phone-budget-agent",
             definition=PromptAgentDefinition(
                 model=model_deployment,
-                instructions="""
-You are a friendly phone sales assistant.
-
-Ask user about:
-- Their budget
-- Preferred brand (optional)
-- Minimum storage required
-- Minimum screen size
-
-Use the function recommend_phone when you have collected enough preferences.
-""",
-                tools=[tool],
+                instructions=(
+                    "You are a helpful shopping assistant. "
+                    "You have access to a CSV file containing phone data including names and prices. "
+                    "When given a budget, use Python to read the CSV file and filter phones "
+                    "that are priced below or equal to that budget. "
+                    "Present the results in a clear, readable format showing the phone name and price."
+                ),
+                tools=[code_interpreter],
             ),
         )
 
         print(f"Using agent: {agent.name}")
 
-        # Start conversation
+        # Create a conversation for the chat session
         conversation = openai_client.conversations.create()
 
+        # Send the initial budget-based query automatically
+        initial_prompt = (
+            f"My budget is ${budget:.2f}. "
+            f"Please read the phones.csv file and list all phones that cost less than or equal to ${budget:.2f}. "
+            f"Show the phone name and price for each result, sorted by price."
+        )
+
+        print(f"\nYou: {initial_prompt}\n")
+
+        # Send user message
+        openai_client.conversations.items.create(
+            conversation_id=conversation.id,
+            items=[
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": initial_prompt,
+                }
+            ],
+        )
+
+        # Get response
+        response = openai_client.responses.create(
+            conversation=conversation.id,
+            extra_body={
+                "agent": {"name": agent.name, "type": "agent_reference"}
+            },
+            input="",
+        )
+
+        # Check for failure
+        if response.status == "failed":
+            print(f"Response failed: {response.error}")
+        else:
+            print(f"Agent: {response.output_text}")
+
+        # Continue with follow-up questions in a loop
         while True:
-            user_prompt = input("You: ")
+
+            user_prompt = input("\nAny follow-up questions? (or type 'quit' to exit): ")
 
             if user_prompt.lower() == "quit":
                 break
 
-            # Send user message into Azure AI
+            if len(user_prompt) == 0:
+                print("Please enter a prompt.")
+                continue
+
+            # Send user message
             openai_client.conversations.items.create(
                 conversation_id=conversation.id,
-                items=[{"type": "message", "role": "user", "content": user_prompt}],
+                items=[
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": user_prompt,
+                    }
+                ],
             )
 
+            # Get response
             response = openai_client.responses.create(
                 conversation=conversation.id,
                 extra_body={
@@ -155,46 +144,38 @@ Use the function recommend_phone when you have collected enough preferences.
                 input="",
             )
 
-            # If failed, show error
+            # Check for failure
             if response.status == "failed":
-                print(f"Error: {response.error}")
+                print(f"Response failed: {response.error}")
                 continue
 
-            # Check if the agent decided to call our function
-            input_list: ResponseInputParam = []
-            for item in response.output:
-                if item.type == "function_call":
-                    if item.name == "recommend_phone":
-
-                        result = recommend_phone(**json.loads(item.arguments))
-
-                        input_list.append(
-                            FunctionCallOutput(
-                                type="function_call_output",
-                                call_id=item.call_id,
-                                output=result,
-                            )
-                        )
-
-            # If we got any function outputs, send back to the model
-            if input_list:
-                response = openai_client.responses.create(
-                    input=input_list,
-                    previous_response_id=response.id,
-                    extra_body={
-                        "agent": {"name": agent.name, "type": "agent_reference"}
-                    },
-                )
-
-            # Print agent output text
+            # Show agent response
             print(f"Agent: {response.output_text}")
 
+        # Conversation log
+        print("\nConversation Log:\n")
+
+        items = openai_client.conversations.items.list(
+            conversation_id=conversation.id
+        )
+
+        for item in items:
+            if item.type == "message":
+                role = item.role.upper()
+                content = item.content[0].text
+                print(f"{role}: {content}\n")
+
         # Clean up
-        openai_client.conversations.delete(conversation_id=conversation.id)
+        openai_client.conversations.delete(
+            conversation_id=conversation.id
+        )
+        print("Conversation deleted")
+
         project_client.agents.delete_version(
             agent_name=agent.name,
             agent_version=agent.version,
         )
+        print("Agent deleted")
 
 
 if __name__ == "__main__":
